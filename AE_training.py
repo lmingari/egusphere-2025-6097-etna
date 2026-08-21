@@ -1,16 +1,18 @@
 #!/usr/bin/env python
 # coding: utf-8
 
+import argparse
+import xarray as xr
+import pandas as pd
+
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchsummary import summary
 
-import xarray as xr
-import pandas as pd
-
-from dataset import EnsembleDataset, LogMinMaxScale
-from model   import Autoencoder, AELoss
+from modules.dataset import EnsembleDataset, LogMinMaxScale
+from modules.model   import Autoencoder, WeightedAELoss
+from modules.config  import CustomConfigParser, print_config
 
 ## Training function
 def train_epoch(model, loader, criterion, optimizer, device):
@@ -58,18 +60,58 @@ def evaluate_epoch(model, loader, criterion, device):
             num_batches += 1
     return {'validation_loss': total_loss/num_batches }
 
-def main(config, fname):
+def load_config(config_path="config.ini", section=None):
+    # Baseline defaults
+    default_config = {
+        'BATCH_SIZE':    16,
+        'LATENT_DIM':    512,
+        'LEARNING_RATE': 1E-4,
+        'NUM_EPOCHS':    100,
+        'MINVAL':        0,
+        'MAXVAL':        8,
+        'SCALE':         1E3,
+        'VARKEY':        'tephra_col_mass',
+    }
+
+    # Initialize parser with hardcoded defaults
+    parser = CustomConfigParser(defaults={k: str(v) for k, v in default_config.items()})
+    parser.read(config_path)
+
+    # Determine target section; fallback to 'DEFAULT' if None or invalid section
+    target_section = section if (section and parser.has_section(section)) else 'DEFAULT'
+
+    # Extract values using native typed getters
+    return {
+        'LEARNING_RATE': parser.getfloat(target_section, 'LEARNING_RATE'),
+        'MINVAL':        parser.getfloat(target_section, 'MINVAL'),
+        'MAXVAL':        parser.getfloat(target_section, 'MAXVAL'),
+        'SCALE':         parser.getfloat(target_section, 'SCALE'),
+        'BATCH_SIZE':    parser.getint(target_section, 'BATCH_SIZE'),
+        'LATENT_DIM':    parser.getint(target_section, 'LATENT_DIM'),
+        'NUM_EPOCHS':    parser.getint(target_section, 'NUM_EPOCHS'),
+        'VARKEY':        parser.get(target_section, 'VARKEY'),
+        'FNAME_TRAIN':   parser.get_required_option(target_section, 'FNAME_TRAIN'),
+        'FNAME_VAL':     parser.get_required_option(target_section, 'FNAME_VAL'),
+        'FNAME_MODEL':   parser.get_required_option(target_section, 'FNAME_MODEL'),
+        'BIN_WEIGHTS':   parser.getlistfloat(target_section, 'BIN_WEIGHTS'),
+        'BIN_EDGES':     parser.getlistfloat(target_section, 'BIN_EDGES'),
+    }
+
+def main(config):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
-    fname_train = 'data/helens64.ens.nc'
-    fname_val   = 'data/helens48.ens.nc'
+    fname_train = config['FNAME_TRAIN'] 
+    fname_val   = config['FNAME_VAL'] 
+    fname_model = config['FNAME_MODEL']
+
+    varkey = config['VARKEY']
 
     ## 1. Loading raw data and normaliation
     ds1 = xr.open_dataset(fname_train)
-    da1 = ds1["tephra_grn_load"]
+    da1 = ds1[varkey]
     ds2 = xr.open_dataset(fname_val)
-    da2 = ds2["tephra_grn_load"]
+    da2 = ds2[varkey]
 
     H = da1.sizes['lat']
     W = da1.sizes['lon']
@@ -77,11 +119,12 @@ def main(config, fname):
     ## 2. Create a custom Dataset
     min_value = config['MINVAL']
     max_value = config['MAXVAL']
-    transform = LogMinMaxScale(min_value, max_value)
+    scale     = config['SCALE']
+    transform = LogMinMaxScale(min_value, max_value, scale)
 
     train_dataset = EnsembleDataset(da1, transform)
     val_dataset   = EnsembleDataset(da2, transform)
-
+    
     ## 3. Create a DataLoader
     train_loader = DataLoader(train_dataset, 
                               batch_size=config['BATCH_SIZE'], 
@@ -89,19 +132,21 @@ def main(config, fname):
     val_loader   = DataLoader(val_dataset,
                               batch_size=config['BATCH_SIZE'],
                               shuffle=False)
-
+    
     ## 4. Define a model
     model = Autoencoder(config['LATENT_DIM'], in_shape = (H,W))
     model = model.to(device)
-#    summary(model, (1,H,W))
-
+    
     ## 5. Loss function
-    criterion = AELoss()
-
+#    criterion = AELoss()
+    criterion = WeightedAELoss(config['BIN_EDGES'], config['BIN_WEIGHTS'])
+    
     ## 6. Optimizer
     optimizer = optim.Adam(model.parameters(), lr=config['LEARNING_RATE'])
 
-    ## Training loop
+    ###
+    ### Training loop
+    ###
     history = []
 
     best_val_loss = float('inf')
@@ -134,22 +179,23 @@ def main(config, fname):
     ## Save trained model
     torch.save({
         'model_state_dict': best_state, # Trained Model parameters
-        'EPOCH':  best_epoch,
-        'LOSS':  best_val_loss, 
+        'BEST_EPOCH':  best_epoch,
+        'BEST_LOSS':  best_val_loss, 
         'IN_SHAPE': (H, W),
         **config
-        }, fname)
+        }, fname_model)
 
 if __name__ == "__main__":
+    # Input parameters and options
+    parser = argparse.ArgumentParser(argument_default=argparse.SUPPRESS,description=__doc__)
+    parser.add_argument('-s', '--section', 
+                        default = None,
+                        help='Section in configuration file', 
+                        type=str)
+    args = parser.parse_args()
 
-    ### Configuration ###
-    config = {
-        'BATCH_SIZE':    16,
-        'LATENT_DIM':    512,
-        'LEARNING_RATE': 1E-4,
-        'NUM_EPOCHS':    400,
-        'MINVAL':        0,
-        'MAXVAL':        12,
-        }
+    # Configuration
+    config = load_config("config.ini", section=args.section)
 
-    main(config, 'ae.pt')
+    print_config(config)
+    main(config)

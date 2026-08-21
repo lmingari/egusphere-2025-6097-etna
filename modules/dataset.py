@@ -39,21 +39,23 @@ class LogMinMaxScale:
         min_value (float): lower bound of the *log-space* linear rescale
         max_value (float): upper bound of the *log-space* linear rescale
     """
-    def __init__(self, min_value, max_value):
+    def __init__(self, min_value, max_value, scale=1.0):
         self.min_value = min_value
         self.max_value = max_value
         self.range     = max_value - min_value
+        self.scale     = scale
+        self.invscale  = 1.0/scale
 
     def __call__(self, x):
         return self.apply(x)
 
     def apply(self, x):
-        x_log = self._log1p(1E6*x)
+        x_log = self._log1p(x*self.scale)
         return (x_log - self.min_value) / self.range
 
     def invert(self, y):
         x_log = y * self.range + self.min_value
-        return self._expm1(x_log)*1E-6
+        return self._expm1(x_log) * self.invscale
 
     @staticmethod
     def _log1p(x):

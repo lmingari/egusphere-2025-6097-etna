@@ -2,8 +2,6 @@
 # coding: utf-8
 
 import torch
-from model import VariationalAutoencoder
-from dataset import LogMinMaxScale
 import xarray as xr
 
 ## Reconstruct samples from a dataset/loader
@@ -58,32 +56,3 @@ def save_samples(x, fname_out):
         name="tephra_grn_load",  # match your variable name from training
     )
     da.to_netcdf(fname_out)
-
-def main(checkpoint, fname_out):
-
-    ## Normalization
-    min_value = checkpoint['MINVAL']
-    max_value = checkpoint['MAXVAL']
-    transform = LogMinMaxScale(min_value, max_value)
-
-    # Model
-    model = VariationalAutoencoder(
-                checkpoint['LATENT_DIM'], 
-                in_shape=checkpoint['IN_SHAPE']
-                )
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.eval()
-
-    ## Generate new samples
-    x = generate_samples(checkpoint['LATENT_DIM'], model, transform, nens = 12)
-
-    ## Save to disk
-    save_samples(x, fname_out)
-    print(f"Saved {x.shape[0]} samples to {fname_out}")
-
-if __name__ == "__main__":
-    ## Load weight parameters and some metadata
-    fname = 'vae.pt'
-    checkpoint = torch.load(fname, map_location='cpu')
-
-    main(checkpoint, fname_out='generated_samples.nc')

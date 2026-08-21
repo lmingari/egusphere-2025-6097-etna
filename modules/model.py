@@ -210,6 +210,46 @@ class AELoss(nn.Module):
     def forward(self, recon_x, x):
         return F.mse_loss(recon_x, x, reduction=self.reduction)
 
+class WeightedAELoss(nn.Module):
+    """
+    Reconstruction loss with inverse-frequency pixel weighting,
+    using quantile-based inner bin edges.
+
+    Args:
+        bin_edges (np.ndarray): bin edges, shape (n+1,), monotonically increasing.
+        bin_weights (np.ndarray or None): per-bin weights, shape (n,).
+        reduction (str): 'mean' or 'sum'
+    """
+    def __init__(self, bin_edges, bin_weights=None, reduction='mean'):
+        super().__init__()
+        if reduction not in {'mean', 'sum'}:
+            raise ValueError("reduction must be 'mean' or 'sum'")
+        self.reduction = reduction
+
+        bin_edges_t = torch.as_tensor(bin_edges, dtype=torch.float32)
+        self.register_buffer('bin_edges', bin_edges_t)
+
+        n_bins = bin_edges_t.numel() - 1
+        if bin_weights is None:
+            bin_weights_t = torch.ones(n_bins, dtype=torch.float32)
+        else:
+            bin_weights_t = torch.as_tensor(bin_weights, dtype=torch.float32)
+            if bin_weights_t.numel() != n_bins:
+                raise ValueError(
+                    f"bin_weights has {bin_weights_t.numel()} entries, "
+                    f"expected {n_bins} ({bin_edges_t.numel()} bin edges -> {n_bins} bins)"
+                )
+        self.register_buffer('bin_weights', bin_weights_t)
+
+    def forward(self, recon_x, x):
+        bin_idx = torch.bucketize(x, self.bin_edges[1:-1], right=False)
+        bin_idx = torch.clamp(bin_idx, 0, self.bin_weights.numel() - 1)
+
+        w = self.bin_weights[bin_idx]
+        se = (recon_x - x) ** 2
+        weighted_se = w * se
+
+        return weighted_se.mean() if self.reduction == 'mean' else weighted_se.sum()
 
 class VAELoss(nn.Module):
     """
