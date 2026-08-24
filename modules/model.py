@@ -68,18 +68,6 @@ class Autoencoder(nn.Module):
             nn.Unflatten(1, (final_c, final_h, final_w)),
         ]
         for i, (c_in, c_out) in enumerate(zip(decoder_in_channels, decoder_out_channels)):
-#            in_h,  in_w  = decoder_in_shapes[i]
-#            out_h, out_w = decoder_out_shapes[i]
-#            out_pad_h = conv_transpose2d_output_padding(in_h, out_h, kernel_size, stride, padding)
-#            out_pad_w = conv_transpose2d_output_padding(in_w, out_w, kernel_size, stride, padding)
-
-#            decoder_layers.append(
-#                nn.ConvTranspose2d(c_in, c_out,
-#                                   kernel_size,
-#                                   stride,
-#                                   padding,
-#                                   output_padding=(out_pad_h, out_pad_w))
-#            )
             decoder_layers.append(
                 nn.Upsample(size=decoder_out_shapes[i], 
                             mode="bilinear", 
@@ -113,7 +101,7 @@ class VariationalAutoencoder(nn.Module):
                  latent_dim, 
                  in_shape, 
                  in_channels=1,
-                 channels=(16, 32, 64), 
+                 channels=(16, 32, 64, 128), 
                  kernel_size=3, 
                  stride=2, 
                  padding=1):
@@ -155,23 +143,23 @@ class VariationalAutoencoder(nn.Module):
             nn.ReLU(True),
             nn.Unflatten(1, (final_c, final_h, final_w)),
         ]
-        for c_in, c_out, layer_in_shape, layer_out_shape in zip(decoder_in_channels,
-                                                    decoder_out_channels,
-                                                    decoder_in_shapes,
-                                                    decoder_out_shapes):
-            in_h,  in_w  = layer_in_shape
-            out_h, out_w = layer_out_shape
-            out_pad_h = conv_transpose2d_output_padding(in_h, out_h, kernel_size, stride, padding)
-            out_pad_w = conv_transpose2d_output_padding(in_w, out_w, kernel_size, stride, padding)
-
+        for i, (c_in, c_out) in enumerate(zip(decoder_in_channels, decoder_out_channels)):
             decoder_layers.append(
-                nn.ConvTranspose2d(c_in, c_out, 
-                                   kernel_size, 
-                                   stride, 
-                                   padding,
-                                   output_padding=(out_pad_h, out_pad_w))
+                nn.Upsample(size=decoder_out_shapes[i], 
+                            mode="bilinear", 
+                            align_corners=False)
+                )
+            decoder_layers.append(
+                nn.Conv2d(c_in, c_out,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                )                                                                                     
             )
-            decoder_layers.append(nn.ReLU(True))
+            if i < len(decoder_in_channels) - 1:
+                decoder_layers.append(nn.ReLU(True))
+            else:
+                decoder_layers.append(nn.Softplus())
         self.decoder = nn.Sequential(*decoder_layers)
 
     def encode(self, x):
@@ -244,12 +232,10 @@ class WeightedAELoss(nn.Module):
     def forward(self, recon_x, x):
         bin_idx = torch.bucketize(x, self.bin_edges[1:-1], right=False)
         bin_idx = torch.clamp(bin_idx, 0, self.bin_weights.numel() - 1)
-
         w = self.bin_weights[bin_idx]
-        se = (recon_x - x) ** 2
-        weighted_se = w * se
-
-        return weighted_se.mean() if self.reduction == 'mean' else weighted_se.sum()
+        se = w * (recon_x - x) ** 2
+        se = se.flatten(start_dim=1).mean(dim=1)
+        return se.mean() if self.reduction == 'mean' else se.sum()
 
 class VAELoss(nn.Module):
     """
@@ -278,6 +264,65 @@ class VAELoss(nn.Module):
             kl = kl.sum()
 
         return kl
+
+    def forward(self, recon_x, x, mu, logvar):
+        recon = self.reconstruction_loss(recon_x, x)
+        kl = self.kl_divergence(mu, logvar)
+        loss = recon + self.beta * kl
+        return loss, recon, kl
+
+class WeightedVAELoss(nn.Module):
+    """
+    Loss function for a Variational Autoencoder (VAE), with inverse-frequency
+    pixel weighting on the reconstruction term.
+
+    Args:
+        bin_edges (array-like): histogram bin edges spanning full data range
+                                 (as from np.histogram / your quantile edges).
+        bin_weights (array-like or None): per-bin weights, length len(bin_edges)-1.
+                                           None -> all ones (plain weighting).
+        beta (float): weight for KL divergence (β-VAE)
+        reduction (str): 'mean' or 'sum' -- applied over the BATCH dimension only.
+                          Per-sample recon and KL are always summed over their
+                          own (pixel / latent) dimensions first, so the two
+                          terms stay on comparable scales regardless of image
+                          size or latent dim.
+    """
+    def __init__(self, bin_edges, bin_weights=None, beta=1.0, reduction='mean'):
+        super().__init__()
+        if reduction not in {'mean', 'sum'}:
+            raise ValueError("reduction must be 'mean' or 'sum'")
+        self.beta = beta
+        self.reduction = reduction
+
+        bin_edges_t = torch.as_tensor(bin_edges, dtype=torch.float32)
+        self.register_buffer('bin_edges', bin_edges_t)
+
+        n_bins = bin_edges_t.numel() - 1
+        if bin_weights is None:
+            bin_weights_t = torch.ones(n_bins, dtype=torch.float32)
+        else:
+            bin_weights_t = torch.as_tensor(bin_weights, dtype=torch.float32)
+            if bin_weights_t.numel() != n_bins:
+                raise ValueError(
+                    f"bin_weights has {bin_weights_t.numel()} entries, "
+                    f"expected {n_bins} ({bin_edges_t.numel()} bin edges -> {n_bins} bins)"
+                )
+        self.register_buffer('bin_weights', bin_weights_t)
+
+    def reconstruction_loss(self, recon_x, x):
+        bin_idx = torch.bucketize(x, self.bin_edges[1:-1], right=False)
+        bin_idx = torch.clamp(bin_idx, 0, self.bin_weights.numel() - 1)
+        w = self.bin_weights[bin_idx]
+        se = w * (recon_x - x) ** 2
+        # Mean over pixels, then batch
+        se = se.flatten(start_dim=1).mean(dim=1)
+        return se.mean() if self.reduction == 'mean' else se.sum()
+
+    def kl_divergence(self, mu, logvar):
+        # KL per latent dimension
+        kl = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)
+        return kl.mean() if self.reduction == 'mean' else kl.sum()
 
     def forward(self, recon_x, x, mu, logvar):
         recon = self.reconstruction_loss(recon_x, x)

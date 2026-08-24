@@ -138,7 +138,6 @@ def main(config):
     model = model.to(device)
     
     ## 5. Loss function
-#    criterion = AELoss()
     criterion = WeightedAELoss(config['BIN_EDGES'], config['BIN_WEIGHTS'])
     
     ## 6. Optimizer
