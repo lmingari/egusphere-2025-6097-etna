@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
+from pathlib import Path
 import argparse
 import xarray as xr
 import pandas as pd
@@ -92,18 +93,22 @@ def load_config(config_path="config.ini", section=None):
         'VARKEY':        parser.get(target_section, 'VARKEY'),
         'FNAME_TRAIN':   parser.get_required_option(target_section, 'FNAME_TRAIN'),
         'FNAME_VAL':     parser.get_required_option(target_section, 'FNAME_VAL'),
-        'FNAME_MODEL':   parser.get_required_option(target_section, 'FNAME_MODEL'),
         'BIN_WEIGHTS':   parser.getlistfloat(target_section, 'BIN_WEIGHTS'),
         'BIN_EDGES':     parser.getlistfloat(target_section, 'BIN_EDGES'),
+        'TARGET_SECTION': target_section,
     }
 
 def main(config):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
-    fname_train = config['FNAME_TRAIN'] 
-    fname_val   = config['FNAME_VAL'] 
-    fname_model = config['FNAME_MODEL']
+    fname_train   = config['FNAME_TRAIN'] 
+    fname_val     = config['FNAME_VAL'] 
+    fname_model   = Path("output") / config['TARGET_SECTION'] / "model.pt"
+    fname_history = Path("output") / config['TARGET_SECTION'] / "history.csv"
+
+    # Automatically creates folders if they don't exist
+    fname_model.parent.mkdir(parents=True, exist_ok=True)
 
     varkey = config['VARKEY']
 
@@ -173,7 +178,7 @@ def main(config):
 
     ## Save metrics
     df = pd.DataFrame(history)
-    df.to_csv("ae_metrics.csv", index=False)
+    df.to_csv(fname_history, index=False)
 
     ## Save trained model
     torch.save({

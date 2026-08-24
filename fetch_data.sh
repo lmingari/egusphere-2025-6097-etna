@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-DATA_DIR="data2"
+DATA_DIR="data"
 URLS_FILE="$DATA_DIR/urls.txt"
 SUMS_FILE="$DATA_DIR/sha256sums.txt"
 
