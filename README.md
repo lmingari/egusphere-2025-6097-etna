@@ -79,10 +79,10 @@ An annealing schedule is used, in which $\beta$ is progressively increased from 
 
 Raw data is normalized according to the transformation:
 
-$$ x = \frac{\text{log1p}(x_{raw}) - \text{MINVAL}}{\text{MAXVAL}} $$
+$$ x = \frac{\text{log1p}(x_{raw}) - \text{MINVAL}}{\text{MAXVAL} - \text{MINVAL} } $$
 
-* `MINVAL`: Minimum value used for normalization.
-* `MAXVAL`: Scale (range) value used for normalization.
+* `MINVAL`: Minimum value of the data (after applying `log1p`), used as the lower bound for normalization.
+* `MAXVAL`: Scale (unit) used to normalize the data. This does not necessarily correspond to the actual maximum of the data (normalized values are not clipped and may exceed 1).
 
 ### Weighted Loss Function
 
