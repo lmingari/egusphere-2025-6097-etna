@@ -47,15 +47,15 @@ An example configuration section from `config.ini` is shown below:
 
 ```ini
 [ETNA2018]
+LATENT_DIM = 32
 LEARNING_RATE = 1E-3
 NUM_EPOCHS = 400
+BETA_MAX = 3E-3
 WARMUP_EPOCHS = 50
-LATENT_DIM = 32
 MINVAL = 0
 MAXVAL = 8
 BIN_WEIGHTS = [0.0244, 0.59, 0.542, 0.393, 0.354, 0.799, 1.12, 4.18]
 BIN_EDGES = [0, 0.13091, 0.26182, 0.39273, 0.52364, 0.65454, 0.78545, 0.91636, 1.0473]
-BETA_MAX = 3E-3
 ```
 
 ### General Hyperparameters
@@ -79,7 +79,7 @@ An annealing schedule is used, in which $\beta$ is progressively increased from 
 
 Raw data is normalized according to the transformation:
 
-$$ x = \frac{\operatorname{log1p}(x_{raw}) - \text{MINVAL}}{\text{MAXVAL}} $$
+$$ x = \frac{\text{log1p}(x_{raw}) - \text{MINVAL}}{\text{MAXVAL}} $$
 
 * `MINVAL`: Minimum value used for normalization.
 * `MAXVAL`: Scale (range) value used for normalization.
