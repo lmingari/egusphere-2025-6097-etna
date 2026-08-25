@@ -1,0 +1,5 @@
+xarray
+netCDF4
+pandas
+torch
+torchsummary
