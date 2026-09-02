@@ -1,3 +1,4 @@
+import numpy as np
 import cartopy.feature as cfeature
 
 def set_map(ax):

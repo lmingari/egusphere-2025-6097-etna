@@ -10,8 +10,8 @@
 set -euo pipefail
 
 DATA_DIR="data"
-URLS_FILE="$DATA_DIR/urls.txt"
-SUMS_FILE="$DATA_DIR/sha256sums.txt"
+URLS_FILE="$DATA_DIR/URLS"
+SUMS_FILE="$DATA_DIR/SHA256SUMS"
 
 if [[ ! -f "$URLS_FILE" ]]; then
     echo "error: $URLS_FILE not found" >&2

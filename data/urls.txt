@@ -1,3 +1,0 @@
-20181224_1800_Meteosat-11_Etna_VPRoutput.nc https://saco.csic.es/public.php/dav/files/N4xnro8XHk5xg8F
-etna2018-128.ens.nc https://saco.csic.es/public.php/dav/files/ox49LDsoyfr7Ti4
-etna2018-48.ens.nc https://saco.csic.es/public.php/dav/files/e77CWgCT6YMdAfT
